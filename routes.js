@@ -1,58 +1,77 @@
 // routes.js
 const express = require('express');
 const router = express.Router();
+const { albums } = require('./data');
 
-// Temporary data storage
-let singles = [
-  { id: 1, name: "Hit Single 1", streams: 0 },
-  { id: 2, name: "Hit Single 2", streams: 0 }
-];
-
-let albums = [
-  { id: 1, name: "Album 1", streams: 0 },
-  { id: 2, name: "Album 2", streams: 0 }
-];
-
-// Home page route
+// Home page: list albums
 router.get('/', (req, res) => {
-  let html = `
-    <h1>JUKE Music App</h1>
-    <h2>Singles</h2>
-    <ul>
-      ${singles.map(s => `<li>${s.name} - Streams: ${s.streams}</li>`).join('')}
-    </ul>
-    <h2>Albums</h2>
-    <ul>
-      ${albums.map(a => `<li>${a.name} - Streams: ${a.streams}</li>`).join('')}
-    </ul>
-  `;
+  let html = `<h1>JUKE Music App</h1>`;
+  albums.forEach(album => {
+    html += `
+      <div style="margin-bottom: 20px;">
+        <img src="${album.coverUrl}" alt="${album.title}" width="150"/>
+        <h2>${album.title} - ${album.artist}</h2>
+        <p><strong>Label:</strong> ${album.label} | <strong>Genre:</strong> ${album.genre}</p>
+        <p><strong>Features:</strong> ${album.features.join(', ')}</p>
+        <p>${album.bio}</p>
+        <p><strong>Album Streams:</strong> ${album.streams}</p>
+        <ul>
+          ${album.tracks.map(track => `<li>${track.title} - ${track.duration} - Streams: ${track.streams}</li>`).join('')}
+        </ul>
+      </div>
+    `;
+  });
   res.send(html);
 });
 
-// Increment single streams
-router.post('/single/:id/stream', (req, res) => {
-  const single = singles.find(s => s.id == req.params.id);
-  if (!single) return res.status(404).send("Single not found");
-  single.streams++;
-  res.send(single);
+// Get all albums (JSON)
+router.get('/albums', (req, res) => res.json(albums));
+
+// Get single album by ID
+router.get('/albums/:id', (req, res) => {
+  const album = albums.find(a => a.id == req.params.id);
+  if (!album) return res.status(404).send("Album not found");
+  res.json(album);
 });
 
-// Increment album streams
-router.post('/album/:id/stream', (req, res) => {
+// Add new album
+router.post('/albums', (req, res) => {
+  const { title, artist, coverUrl, releaseDate, label, genre, bio, features, tracks } = req.body;
+  const id = albums.length + 1;
+  const newAlbum = { id, title, artist, coverUrl, releaseDate, label, genre, bio, features, tracks, streams: 0 };
+  albums.push(newAlbum);
+  res.json(newAlbum);
+});
+
+// Stream album
+router.post('/albums/:id/stream', (req, res) => {
   const album = albums.find(a => a.id == req.params.id);
   if (!album) return res.status(404).send("Album not found");
   album.streams++;
-  res.send(album);
+  res.json(album);
 });
 
-// Get all singles
-router.get('/singles', (req, res) => {
-  res.json(singles);
+// Stream track
+router.post('/albums/:albumId/tracks/:trackId/stream', (req, res) => {
+  const album = albums.find(a => a.id == req.params.albumId);
+  if (!album) return res.status(404).send("Album not found");
+  const track = album.tracks.find(t => t.id == req.params.trackId);
+  if (!track) return res.status(404).send("Track not found");
+  track.streams++;
+  res.json(track);
 });
 
-// Get all albums
-router.get('/albums', (req, res) => {
-  res.json(albums);
+// Search albums/tracks by query (title, artist, label, genre)
+router.get('/search', (req, res) => {
+  const query = req.query.q?.toLowerCase() || "";
+  const results = albums.filter(a =>
+    a.title.toLowerCase().includes(query) ||
+    a.artist.toLowerCase().includes(query) ||
+    a.label.toLowerCase().includes(query) ||
+    a.genre.toLowerCase().includes(query) ||
+    a.tracks.some(t => t.title.toLowerCase().includes(query))
+  );
+  res.json(results);
 });
 
-module.exports = { router, singles, albums };
+module.exports = { router };
