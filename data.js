@@ -1,5 +1,4 @@
 // data.js
-
 let albums = [
   {
     id: 1,
@@ -36,4 +35,3 @@ let albums = [
 ];
 
 module.exports = { albums };
-
