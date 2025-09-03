@@ -1,85 +1,168 @@
-// Home page with fixed search bar
+// Home page with Apple Music-style grid + MP3 player queue
 router.get('/', (req, res) => {
   let html = `
   <html>
   <head>
     <title>JUKE Music App</title>
     <style>
-      body { font-family: Arial, sans-serif; margin:0; padding-bottom:60px; }
-      .album { margin-bottom: 30px; border-bottom:1px solid #ccc; padding-bottom:10px; }
-      .album img { width:150px; display:block; margin-bottom:5px; }
+      body { font-family: Arial, sans-serif; margin:0; padding-bottom:120px; background:#f9f9f9; }
+      h1 { text-align:center; }
+      .grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; padding:20px; }
+      .album-card { background:white; border-radius:10px; padding:15px; width:200px; box-shadow:0 2px 6px rgba(0,0,0,0.2); display:flex; flex-direction:column; align-items:center; }
+      .album-card img { width:150px; height:150px; object-fit:cover; border-radius:5px; margin-bottom:10px; }
+      .album-card h2 { font-size:16px; margin:5px 0 2px 0; text-align:center; }
+      .album-card p { font-size:12px; margin:2px 0; text-align:center; }
+      .album-card button { margin-top:5px; padding:6px 10px; font-size:12px; cursor:pointer; border:none; border-radius:5px; background:#1db954; color:white; }
+      .album-card ul { padding-left:20px; font-size:12px; list-style-type: disc; width:100%; }
+      .album-card li { margin-bottom:4px; }
       .search-bar { 
-        position: fixed; bottom: 0; left: 0; width: 100%; 
-        background: #f0f0f0; padding: 10px; display:flex;
+        position: fixed; bottom: 60px; left: 0; width: 100%; 
+        background: #fff; padding: 10px; display:flex;
         box-shadow: 0 -2px 5px rgba(0,0,0,0.2);
       }
       .search-bar input { flex:1; padding:8px; font-size:16px; }
-      .search-bar button { padding:8px 12px; font-size:16px; margin-left:5px; }
+      .search-bar button { padding:8px 12px; font-size:16px; margin-left:5px; background:#1db954; color:white; border:none; border-radius:5px; cursor:pointer; }
+      .player { 
+        position: fixed; bottom:0; left:0; width:100%; 
+        background:#222; color:white; padding:10px; display:flex; align-items:center; justify-content:space-between;
+      }
+      .player button, .player input[type=range] { margin:0 5px; }
+      .queue { font-size:12px; max-height:60px; overflow-y:auto; }
     </style>
   </head>
   <body>
     <h1>JUKE Music App</h1>
-    <a href="/add-album">Add New Album</a><hr>
-    <div id="albums">`;
+    <a href="/add-album" style="display:block;text-align:center;margin-bottom:10px;">Add New Album</a>
+    <div class="grid" id="albums"></div>
 
-  albums.forEach(album => {
-    html += `
-      <div class="album">
-        ${album.coverUrl ? `<img src="${album.coverUrl}"/>` : ""}
-        <h2>${album.title} - ${album.artist}</h2>
-        <p>${album.label} | ${album.genre}</p>
-        <p>${album.bio}</p>
-        <p>Album Streams: ${album.streams}</p>
-        <ul>
-          ${album.tracks.map(t => `
-            <li>${t.title} - ${t.duration} - Streams: ${t.streams}
-              <form style="display:inline" method="POST" action="/albums/${album.id}/tracks/${t.id}/stream">
-                <button type="submit">Stream Track</button>
-              </form>
-            </li>`).join('')}
-        </ul>
-        <form method="POST" action="/albums/${album.id}/stream">
-          <button type="submit">Stream Album</button>
-        </form>
-      </div>
-    `;
-  });
-
-  html += `
-    </div>
     <div class="search-bar">
       <input type="text" id="searchInput" placeholder="Search albums or tracks..."/>
       <button onclick="searchAlbums()">Search</button>
     </div>
+
+    <!-- Music Player -->
+    <div class="player">
+      <div>
+        <button onclick="prevTrack()">⏮️</button>
+        <button onclick="togglePlay()">▶️/⏸️</button>
+        <button onclick="nextTrack()">⏭️</button>
+      </div>
+      <div style="flex:1; margin:0 10px;">
+        <strong id="nowPlaying">No track playing</strong>
+        <div class="queue" id="queue"></div>
+      </div>
+      <div>
+        🔊 <input type="range" id="volume" min="0" max="1" step="0.05" value="1" onchange="setVolume(this.value)">
+      </div>
+      <audio id="audioPlayer" controls style="display:none;"></audio>
+    </div>
+
     <script>
+      let queue = [];
+      let currentIndex = 0;
+      const audioPlayer = document.getElementById('audioPlayer');
+      const nowPlaying = document.getElementById('nowPlaying');
+      const queueDiv = document.getElementById('queue');
+
+      // Load albums
+      function loadAlbums() {
+        fetch('/search?q=')
+          .then(res=>res.json())
+          .then(renderAlbums);
+      }
+
+      function renderAlbums(albums) {
+        const albumsDiv = document.getElementById('albums');
+        albumsDiv.innerHTML = '';
+        albums.forEach(album => {
+          let tracksHtml = album.tracks.map(t => 
+            \`<li>\${t.title} - \${t.duration} - Streams: \${t.streams} 
+              <button onclick="addToQueue('\${t.title}', '/uploads/\${t.file}')">Play</button>
+              <button onclick="streamTrack(\${album.id},\${t.id})">Stream</button>
+            </li>\`
+          ).join('');
+          albumsDiv.innerHTML += \`
+            <div class="album-card">
+              \${album.coverUrl ? '<img src="' + album.coverUrl + '"/>' : ''}
+              <h2>\${album.title}</h2>
+              <p>\${album.artist}</p>
+              <p>Streams: <span id="album-stream-\${album.id}">\${album.streams}</span></p>
+              <ul>\${tracksHtml}</ul>
+              <button onclick="streamAlbum(\${album.id})">Stream Album</button>
+            </div>
+          \`;
+        });
+      }
+
       function searchAlbums() {
         const query = document.getElementById('searchInput').value;
         fetch('/search?q=' + encodeURIComponent(query))
-          .then(res => res.json())
-          .then(data => {
-            const albumsDiv = document.getElementById('albums');
-            albumsDiv.innerHTML = '';
-            data.forEach(album => {
-              let tracksHtml = album.tracks.map(t =>
-                \`<li>\${t.title} - \${t.duration} - Streams: \${t.streams}</li>\`
-              ).join('');
-              albumsDiv.innerHTML += \`
-                <div class="album">
-                  \${album.coverUrl ? '<img src="' + album.coverUrl + '"/>' : ''}
-                  <h2>\${album.title} - \${album.artist}</h2>
-                  <p>\${album.label} | \${album.genre}</p>
-                  <p>\${album.bio}</p>
-                  <p>Album Streams: \${album.streams}</p>
-                  <ul>\${tracksHtml}</ul>
-                </div>
-              \`;
-            });
-          });
+          .then(res=>res.json())
+          .then(renderAlbums);
       }
+
+      // Queue system
+      function addToQueue(title, file) {
+        queue.push({title, file});
+        updateQueue();
+        if (queue.length === 1) {
+          playTrack(0);
+        }
+      }
+
+      function playTrack(index) {
+        if (index < 0 || index >= queue.length) return;
+        currentIndex = index;
+        audioPlayer.src = queue[index].file;
+        audioPlayer.play();
+        nowPlaying.textContent = "Now Playing: " + queue[index].title;
+        updateQueue();
+      }
+
+      function nextTrack() {
+        if (currentIndex < queue.length-1) {
+          playTrack(currentIndex+1);
+        }
+      }
+
+      function prevTrack() {
+        if (currentIndex > 0) {
+          playTrack(currentIndex-1);
+        }
+      }
+
+      function togglePlay() {
+        if (audioPlayer.paused) {
+          audioPlayer.play();
+        } else {
+          audioPlayer.pause();
+        }
+      }
+
+      function setVolume(val) {
+        audioPlayer.volume = val;
+      }
+
+      function updateQueue() {
+        queueDiv.innerHTML = queue.map((t,i) =>
+          \`<div style="color:\${i===currentIndex?'#1db954':'white'}">\${i+1}. \${t.title}</div>\`
+        ).join('');
+      }
+
+      function streamTrack(albumId, trackId) {
+        fetch(\`/albums/\${albumId}/tracks/\${trackId}/stream\`, { method:'POST' })
+          .then(()=>loadAlbums());
+      }
+
+      function streamAlbum(albumId) {
+        fetch(\`/albums/\${albumId}/stream\`, { method:'POST' })
+          .then(()=>loadAlbums());
+      }
+
+      loadAlbums();
     </script>
   </body>
   </html>
   `;
-
   res.send(html);
 });
