@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Add Album</title></head>
+<body>
+  <h1>Add Album</h1>
+  <form id="f" enctype="multipart/form-data">
+    Title: <input name="title" required/><br/>
+    Artist: <input name="artist" required/><br/>
+    Label: <input name="label"/><br/>
+    Genre: <input name="genre"/><br/>
+    Features (comma): <input name="features"/><br/>
+    Bio: <textarea name="bio"></textarea><br/>
+    Cover: <input type="file" name="cover" accept="image/*"/><br/>
+    Tracks (multiple mp3s): <input type="file" name="tracks" accept="audio/*" multiple/><br/>
+    <button type="submit">Upload</button>
+  </form>
+
+  <script>
+    document.getElementById('f').onsubmit = async function(e){
+      e.preventDefault();
+      const fd = new FormData(this);
+      const res = await fetch('/api/albums', { method:'POST', body: fd });
+      if (res.ok) {
+        alert('Album uploaded');
+        window.location = '/';
+      } else {
+        alert('Upload failed');
+      }
+    };
+  </script>
+</body>
+</html>
