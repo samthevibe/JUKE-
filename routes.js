@@ -1,272 +1,186 @@
+// routes.js
 const express = require('express');
-let albums = require('./data');
+const router = express.Router();
+const path = require('path');
+const mm = require('music-metadata');
+const fs = require('fs');
+const { albums, playlists, saveAll, addAlbum, addPlaylist } = require('./data');
 
-module.exports = (upload) => {
-  const router = express.Router();
+// helpers
+function prettyDuration(sec) {
+  if (!sec) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
 
-  // Homepage with MP3 player + search
-  router.get('/', (req, res) => {
-    let html = `
-    <html>
-    <head>
-      <title>JUKE Music App</title>
-      <style>
-        body { font-family: Arial, sans-serif; margin:0; padding-bottom:120px; background:#f9f9f9; }
-        h1 { text-align:center; }
-        .grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; padding:20px; }
-        .album-card { background:white; border-radius:10px; padding:15px; width:200px; box-shadow:0 2px 6px rgba(0,0,0,0.2); display:flex; flex-direction:column; align-items:center; }
-        .album-card img { width:150px; height:150px; object-fit:cover; border-radius:5px; margin-bottom:10px; }
-        .album-card h2 { font-size:16px; margin:5px 0 2px 0; text-align:center; }
-        .album-card p { font-size:12px; margin:2px 0; text-align:center; }
-        .album-card button { margin-top:5px; padding:6px 10px; font-size:12px; cursor:pointer; border:none; border-radius:5px; background:#1db954; color:white; }
-        .album-card ul { padding-left:20px; font-size:12px; list-style-type: disc; width:100%; }
-        .album-card li { margin-bottom:4px; }
-        .search-bar { position: fixed; bottom: 60px; left: 0; width: 100%; background: #fff; padding: 10px; display:flex; box-shadow: 0 -2px 5px rgba(0,0,0,0.2); }
-        .search-bar input { flex:1; padding:8px; font-size:16px; }
-        .search-bar button { padding:8px 12px; font-size:16px; margin-left:5px; background:#1db954; color:white; border:none; border-radius:5px; cursor:pointer; }
-        .player { position: fixed; bottom:0; left:0; width:100%; background:#222; color:white; padding:10px; display:flex; align-items:center; justify-content:space-between; }
-        .player button, .player input[type=range] { margin:0 5px; }
-        .queue { font-size:12px; max-height:60px; overflow-y:auto; }
-      </style>
-    </head>
-    <body>
-      <h1>JUKE Music App</h1>
-      <a href="/add-album" style="display:block;text-align:center;margin-bottom:10px;">Add New Album</a>
-      <div class="grid" id="albums"></div>
+// ---- Home page: grid + player + search
+router.get('/', (req, res) => {
+  // serve a full frontend that calls /api endpoints for dynamic content
+  res.sendFile(path.join(__dirname, 'frontend', 'index.html'));
+});
 
-      <div class="search-bar">
-        <input type="text" id="searchInput" placeholder="Search albums or tracks..."/>
-        <button onclick="searchAlbums()">Search</button>
-      </div>
+// ---- Static API endpoints used by frontend
+router.get('/api/albums', (req, res) => {
+  // return full albums list (non-sensitive)
+  const out = albums.map(a => ({
+    ...a,
+    // ensure each track has duration string
+    tracks: a.tracks.map(t => ({ ...t }))
+  }));
+  res.json(out);
+});
 
-      <!-- Music Player -->
-      <div class="player">
-        <div>
-          <button onclick="prevTrack()">⏮️</button>
-          <button onclick="togglePlay()">▶️/⏸️</button>
-          <button onclick="nextTrack()">⏭️</button>
-        </div>
-        <div style="flex:1; margin:0 10px;">
-          <strong id="nowPlaying">No track playing</strong>
-          <div class="queue" id="queue"></div>
-        </div>
-        <div>
-          🔊 <input type="range" id="volume" min="0" max="1" step="0.05" value="1" onchange="setVolume(this.value)">
-        </div>
-        <audio id="audioPlayer" controls style="display:none;"></audio>
-      </div>
+router.get('/api/albums/:id', (req, res) => {
+  const album = albums.find(a => a.id == req.params.id);
+  if (!album) return res.status(404).send({ error: 'Not found' });
+  res.json(album);
+});
 
-      <script>
-        let queue = [];
-        let currentIndex = 0;
-        const audioPlayer = document.getElementById('audioPlayer');
-        const nowPlaying = document.getElementById('nowPlaying');
-        const queueDiv = document.getElementById('queue');
+// Search endpoint (title/artist/track/label/genre)
+router.get('/api/search', (req, res) => {
+  const q = (req.query.q || '').toLowerCase();
+  if (!q) return res.json(albums);
+  const results = albums.filter(a =>
+    a.title.toLowerCase().includes(q) ||
+    (a.artist && a.artist.toLowerCase().includes(q)) ||
+    (a.label && a.label.toLowerCase().includes(q)) ||
+    (a.genre && a.genre.toLowerCase().includes(q)) ||
+    a.tracks.some(t => t.title.toLowerCase().includes(q))
+  );
+  res.json(results);
+});
 
-        // Load albums
-        function loadAlbums() {
-          fetch('/search?q=')
-            .then(res=>res.json())
-            .then(renderAlbums);
-        }
+// Trending (top tracks & top albums)
+router.get('/api/trending', (req, res) => {
+  // top albums by streams
+  const topAlbums = [...albums].sort((a,b)=>b.streams-a.streams).slice(0,10);
+  // top tracks across albums
+  const tracks = [];
+  albums.forEach(a => a.tracks.forEach(t => tracks.push({ albumId: a.id, albumTitle: a.title, ...t })));
+  const topTracks = tracks.sort((a,b)=>b.streams - a.streams).slice(0,10);
+  res.json({ topAlbums, topTracks });
+});
 
-        function renderAlbums(albums) {
-          const albumsDiv = document.getElementById('albums');
-          albumsDiv.innerHTML = '';
-          albums.forEach(album => {
-            let tracksHtml = album.tracks.map(t => 
-              \`<li>\${t.title} - \${t.duration} - Streams: \${t.streams} 
-                <button onclick="addToQueue('\${t.title}', '/uploads/\${t.file}')">Play</button>
-                <button onclick="streamTrack(\${album.id},\${t.id})">Stream</button>
-              </li>\`
-            ).join('');
-            albumsDiv.innerHTML += \`
-              <div class="album-card">
-                \${album.coverUrl ? '<img src="' + album.coverUrl + '"/>' : ''}
-                <h2>\${album.title}</h2>
-                <p>\${album.artist}</p>
-                <p>\${album.label}</p>
-                <p>\${album.bio}</p>
-                <p>Streams: <span id="album-stream-\${album.id}">\${album.streams}</span></p>
-                <ul>\${tracksHtml}</ul>
-                <button onclick="streamAlbum(\${album.id})">Stream Album</button>
-              </div>
-            \`;
+// Recently added
+router.get('/api/recent', (req,res)=>{
+  const recent = [...albums].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,10);
+  res.json(recent);
+});
+
+// ---- Uploading albums (covers + mp3s) -- upload handled in index.js and passed multer instance
+module.exports = function(upload) {
+  // Add album form page
+  router.get('/add', (req,res)=>{
+    res.sendFile(path.join(__dirname, 'frontend', 'add.html'));
+  });
+
+  // handle upload fields: cover (single), tracks (multiple)
+  router.post('/api/albums', upload.fields([{ name: 'cover' }, { name: 'tracks' }]), async (req, res) => {
+    try {
+      const { title, artist, label, genre, bio, features } = req.body;
+      const featuresArr = features ? features.split(',').map(s=>s.trim()).filter(Boolean) : [];
+
+      const newAlbum = {
+        title: title || 'Untitled',
+        artist: artist || 'Unknown',
+        coverUrl: '',
+        label: label || '',
+        genre: genre || '',
+        bio: bio || '',
+        features: featuresArr,
+        tracks: [],
+        streams: 0
+      };
+
+      // cover
+      if (req.files && req.files.cover && req.files.cover[0]) {
+        newAlbum.coverUrl = `/uploads/${req.files.cover[0].filename}`;
+      }
+
+      // tracks
+      if (req.files && req.files.tracks) {
+        let idx = 1;
+        for (const f of req.files.tracks) {
+          // detect duration
+          let duration = null;
+          try {
+            const meta = await mm.parseFile(f.path);
+            duration = meta.format.duration; // seconds (float)
+          } catch (e) { console.warn('metadata fail', e.message); }
+          newAlbum.tracks.push({
+            id: idx++,
+            title: f.originalname,
+            duration: prettyDuration(duration),
+            durationSec: duration || 0,
+            streams: 0,
+            file: f.filename
           });
         }
-
-        function searchAlbums() {
-          const query = document.getElementById('searchInput').value;
-          fetch('/search?q=' + encodeURIComponent(query))
-            .then(res=>res.json())
-            .then(renderAlbums);
-        }
-
-        // Queue system
-        function addToQueue(title, file) {
-          queue.push({title, file});
-          updateQueue();
-          if (queue.length === 1) {
-            playTrack(0);
-          }
-        }
-
-        function playTrack(index) {
-          if (index < 0 || index >= queue.length) return;
-          currentIndex = index;
-          audioPlayer.src = queue[index].file;
-          audioPlayer.play();
-          nowPlaying.textContent = "Now Playing: " + queue[index].title;
-          updateQueue();
-        }
-
-        function nextTrack() {
-          if (currentIndex < queue.length-1) {
-            playTrack(currentIndex+1);
-          }
-        }
-
-        function prevTrack() {
-          if (currentIndex > 0) {
-            playTrack(currentIndex-1);
-          }
-        }
-
-        function togglePlay() {
-          if (audioPlayer.paused) {
-            audioPlayer.play();
-          } else {
-            audioPlayer.pause();
-          }
-        }
-
-        function setVolume(val) {
-          audioPlayer.volume = val;
-        }
-
-        function updateQueue() {
-          queueDiv.innerHTML = queue.map((t,i) =>
-            \`<div style="color:\${i===currentIndex?'#1db954':'white'}">\${i+1}. \${t.title}</div>\`
-          ).join('');
-        }
-
-        function streamTrack(albumId, trackId) {
-          fetch(\`/albums/\${albumId}/tracks/\${trackId}/stream\`, { method:'POST' })
-            .then(()=>loadAlbums());
-        }
-
-        function streamAlbum(albumId) {
-          fetch(\`/albums/\${albumId}/stream\`, { method:'POST' })
-            .then(()=>loadAlbums());
-        }
-
-        loadAlbums();
-      </script>
-    </body>
-    </html>
-    `;
-    res.send(html);
-  });
-
-  // Add album form
-  router.get('/add-album', (req, res) => {
-    res.send(`
-      <html>
-      <body>
-        <h1>Add Album</h1>
-        <form action="/add-album" method="post" enctype="multipart/form-data">
-          Title: <input type="text" name="title" required/><br/>
-          Artist: <input type="text" name="artist" required/><br/>
-          Label: <input type="text" name="label"/><br/>
-          Bio: <textarea name="bio"></textarea><br/>
-          Cover: <input type="file" name="cover"/><br/>
-          Track MP3s: <input type="file" name="tracks" multiple/><br/>
-          <button type="submit">Add Album</button>
-        </form>
-      </body>
-      </html>
-    `);
-  });
-
-  // Handle album upload
-  router.post('/add-album', upload.fields([{ name: 'cover' }, { name: 'tracks' }]), (req, res) => {
-    const newAlbum = {
-      id: albums.length+1,
-      title: req.body.title,
-      artist: req.body.artist,
-      label: req.body.label || "",
-      bio: req.body.bio || "",
-      coverUrl: req.files['cover'] ? '/uploads/' + req.files['cover'][0].filename : "",
-      streams: 0,
-      tracks: []
-    };
-
-    if (req.files['tracks']) {
-      newAlbum.tracks = req.files['tracks'].map((file, idx) => ({
-        id: idx+1,
-        title: file.originalname,
-        duration: "3:00", // placeholder
-        streams: 0,
-        file: file.filename
-      }));
-    }
-
-    albums.push(newAlbum);
-    res.redirect('/');
-  });
-
-  // Stream album
-  router.post('/albums/:id/stream', (req, res) => {
-    const album = albums.find(a => a.id == req.params.id);
-    if (album) {
-      album.streams++;
-      album.tracks.forEach(t => t.streams++);
-    }
-    res.sendStatus(200);
-  });
-
-  // Stream track
-  router.post('/albums/:albumId/tracks/:trackId/stream', (req, res) => {
-    const album = albums.find(a => a.id == req.params.albumId);
-    if (album) {
-      const track = album.tracks.find(t => t.id == req.params.trackId);
-      if (track) {
-        album.streams++;
-        track.streams++;
       }
+
+      const saved = addAlbum(newAlbum);
+      res.json(saved);
+    } catch (e) {
+      console.error(e);
+      res.status(500).send({ error: 'upload failed' });
     }
+  });
+
+  // ---- stream counting endpoints
+  // stream album (counts as album stream; still increments track streams)
+  router.post('/api/albums/:id/stream', (req,res)=>{
+    const album = albums.find(a=>a.id==req.params.id);
+    if(!album) return res.status(404).send({error:'not found'});
+    // album-equivalent conversion and weighted logic can be complex. For simplicity store both:
+    album.streams++;
+    // increment each track a little? we'll not auto-increment track streams here.
+    saveAll();
     res.sendStatus(200);
   });
 
-  // Search
-  router.get('/search', (req, res) => {
-    const q = req.query.q?.toLowerCase() || "";
-    const results = albums.filter(a =>
-      a.title.toLowerCase().includes(q) ||
-      a.artist.toLowerCase().includes(q) ||
-      a.tracks.some(t => t.title.toLowerCase().includes(q))
-    );
-    res.json(results);
+  // stream track (increments track + album influence)
+  router.post('/api/albums/:albumId/tracks/:trackId/stream', (req,res)=>{
+    const album = albums.find(a=>a.id==req.params.albumId);
+    if(!album) return res.status(404).send({error:'not found'});
+    const track = album.tracks.find(t=>t.id==req.params.trackId);
+    if(!track) return res.status(404).send({error:'not found'});
+    track.streams++;
+    // album stream update policy: increase album streams by fractional amount
+    // simple rule: 12 track streams = 1 album stream
+    album.streams += 1/12;
+    saveAll();
+    res.sendStatus(200);
+  });
+
+  // ---- playlists
+  router.get('/api/playlists', (req,res)=> res.json(playlists));
+  router.post('/api/playlists', (req,res)=>{
+    const { name } = req.body;
+    const p = addPlaylist(name);
+    res.json(p);
+  });
+  router.post('/api/playlists/:id/add', (req,res)=>{
+    const p = playlists.find(x=>x.id==req.params.id);
+    if(!p) return res.status(404).send({error:'not found'});
+    const { albumId, trackId } = req.body;
+    p.items.push({ albumId, trackId });
+    saveAll();
+    res.sendStatus(200);
+  });
+  router.post('/api/playlists/:id/remove', (req,res)=>{
+    const p = playlists.find(x=>x.id==req.params.id);
+    if(!p) return res.status(404).send({error:'not found'});
+    const { index } = req.body;
+    p.items.splice(index,1);
+    saveAll();
+    res.sendStatus(200);
+  });
+
+  // ---- serve uploads (already done in index.js static handler) but keep route for sanity
+  router.get('/uploads/:file', (req,res)=>{
+    res.sendFile(path.join(__dirname,'uploads', req.params.file));
   });
 
   return router;
 };
-
-
-      function streamTrack(albumId, trackId) {
-        fetch(\`/albums/\${albumId}/tracks/\${trackId}/stream\`, { method:'POST' })
-          .then(()=>loadAlbums());
-      }
-
-      function streamAlbum(albumId) {
-        fetch(\`/albums/\${albumId}/stream\`, { method:'POST' })
-          .then(()=>loadAlbums());
-      }
-
-      loadAlbums();
-    </script>
-  </body>
-  </html>
-  `;
-  res.send(html);
-});
