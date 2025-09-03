@@ -1,37 +1,30 @@
-// data.js
 let albums = [
   {
     id: 1,
-    title: "Evergreen Vibes",
-    artist: "Sam The Vibe",
-    coverUrl: "https://example.com/evergreen.jpg",
-    releaseDate: "2025-09-01",
-    label: "JUKE Records",
-    genre: "Hip-Hop/R&B",
-    bio: "Debut album featuring smooth beats and chill vibes.",
-    features: ["Artist A", "Artist B"],
+    title: "Album 1",
+    artist: "Artist A",
+    coverUrl: "",
+    label: "Indie Label",
+    bio: "This is Album 1 bio.",
+    streams: 0,
     tracks: [
-      { id: 1, title: "Morning Glow", duration: "3:45", streams: 0 },
-      { id: 2, title: "Midnight Drive", duration: "4:12", streams: 0 }
-    ],
-    streams: 0
+      { id: 1, title: "Hit Single 1", duration: "3:45", streams: 0, file: "" },
+      { id: 2, title: "Track 2", duration: "4:20", streams: 0, file: "" }
+    ]
   },
   {
     id: 2,
-    title: "Nightfall Dreams",
-    artist: "Sam The Vibe",
-    coverUrl: "https://example.com/nightfall.jpg",
-    releaseDate: "2025-10-01",
-    label: "JUKE Records",
-    genre: "R&B/Soul",
-    bio: "Smooth night vibes to relax and unwind.",
-    features: ["Artist C"],
+    title: "Album 2",
+    artist: "Artist B",
+    coverUrl: "",
+    label: "Major Label",
+    bio: "This is Album 2 bio.",
+    streams: 0,
     tracks: [
-      { id: 1, title: "Starry Skies", duration: "4:05", streams: 0 },
-      { id: 2, title: "Moonlight Drive", duration: "3:55", streams: 0 }
-    ],
-    streams: 0
+      { id: 1, title: "Hit Single 2", duration: "2:55", streams: 0, file: "" },
+      { id: 2, title: "Track 2", duration: "3:30", streams: 0, file: "" }
+    ]
   }
 ];
 
-module.exports = { albums };
+module.exports = albums;
